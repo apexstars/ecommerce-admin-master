@@ -1,4 +1,4 @@
-import { LayoutDashboard, LogOut, Menu, Package, ShieldCheck, ShoppingBag, X } from 'lucide-react';
+import { LayoutDashboard, LogOut, Menu, Package, ShieldCheck, ShoppingBag, Users, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import type { PermissionKey } from '../api/types';
@@ -9,6 +9,7 @@ const NAV: { to: string; label: string; icon: typeof Package; permission?: Permi
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/orders', label: 'Orders', icon: ShoppingBag, permission: 'orders:view' },
   { to: '/products', label: 'Products', icon: Package, permission: 'products:view' },
+  { to: '/customers', label: 'Customers', icon: Users, permission: 'customers:view' },
   { to: '/settings/roles', label: 'Roles & Permissions', icon: ShieldCheck, permission: 'settings:view' },
 ];
 

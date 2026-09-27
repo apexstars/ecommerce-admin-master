@@ -170,6 +170,7 @@ function Actions({ order }: { order: OrderDetail }) {
 
 export function OrderDetailPage() {
   const { id = '' } = useParams();
+  const { can } = useAuth();
   const { data: order, error, isPending } = useOrder(id);
 
   if (isPending) return <Spinner />;
@@ -296,7 +297,15 @@ export function OrderDetailPage() {
             </h2>
             {order.customer ? (
               <>
-                <p className="strong">{order.customer.name}</p>
+                <p className="strong">
+                  {can('customers:view') ? (
+                    <Link to={`/customers/${order.customer.id}`} className="link">
+                      {order.customer.name}
+                    </Link>
+                  ) : (
+                    order.customer.name
+                  )}
+                </p>
                 <p>
                   <a href={`mailto:${order.customer.email}`} className="link">
                     {order.customer.email}

@@ -35,6 +35,21 @@ export async function ordersAdminRoutes(app: FastifyInstance) {
     ),
   );
 
+  // Order history per customer, for the customer screens. Gated on orders:view so a
+  // customers-only role sees contact details but not purchase history.
+  app.get('/orders/customer-stats', { config: { permission: 'orders:view' } }, async (req) => {
+    const { customerIds } = parse(
+      z.object({
+        customerIds: z
+          .string()
+          .transform((v) => v.split(',').filter(Boolean))
+          .pipe(z.array(z.string().uuid()).min(1).max(100)),
+      }),
+      req.query,
+    );
+    return orders.customerOrderStats(customerIds);
+  });
+
   app.get('/orders/:id', { config: { permission: 'orders:view' } }, async (req) => orders.getOrder(parse(IdParams, req.params).id));
 
   app.post('/orders/:id/fulfillment', { config: { permission: 'orders:edit' } }, async (req) => {

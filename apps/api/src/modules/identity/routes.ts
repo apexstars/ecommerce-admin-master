@@ -144,16 +144,67 @@ export async function rolesAdminRoutes(app: FastifyInstance) {
   });
 }
 
+const Address = z.object({
+  name: z.string().trim().min(1).max(100),
+  line1: z.string().trim().min(1).max(200),
+  line2: z.string().trim().max(200).nullish(),
+  city: z.string().trim().min(1).max(100),
+  region: z.string().trim().min(1).max(100),
+  postalCode: z.string().trim().min(1).max(20),
+  country: z.string().trim().length(2, 'Use a 2-letter country code').toUpperCase(),
+  isDefault: z.boolean().optional(),
+});
+const AddressParams = z.object({ id: z.string().uuid(), addressId: z.string().uuid() });
+
 export async function customersAdminRoutes(app: FastifyInstance) {
   app.get('/customers', { config: { permission: 'customers:view' } }, async (req) =>
-    customers.listCustomers(parse(PageQuery.extend({ search: z.string().trim().optional() }), req.query)),
+    customers.listCustomers(
+      parse(
+        PageQuery.extend({
+          search: z.string().trim().optional(),
+          sort: z.enum(['newest', 'oldest', 'name']).default('newest'),
+          includeErased: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+        }),
+        req.query,
+      ),
+    ),
   );
+
   app.get('/customers/:id', { config: { permission: 'customers:view' } }, async (req) =>
     customers.getCustomer(parse(IdParams, req.params).id),
   );
+
+  app.post('/customers', { config: { permission: 'customers:create' } }, async (req, reply) => {
+    const body = parse(
+      z.object({ name: z.string().trim().min(1).max(100), email: z.string().trim().email(), address: Address.omit({ isDefault: true }).optional() }),
+      req.body,
+    );
+    return reply.code(201).send(await customers.createCustomer(adminOf(req), body));
+  });
+
   app.patch('/customers/:id', { config: { permission: 'customers:edit' } }, async (req) => {
-    const body = parse(z.object({ name: z.string().trim().min(1).optional(), email: z.string().email().optional() }), req.body);
-    return customers.updateCustomer(parse(IdParams, req.params).id, body);
+    const body = parse(z.object({ name: z.string().trim().min(1).max(100).optional(), email: z.string().trim().email().optional() }), req.body);
+    return customers.updateCustomer(adminOf(req), parse(IdParams, req.params).id, body);
+  });
+
+  // Erases personal data; order history is kept (see eraseCustomer).
+  app.delete('/customers/:id', { config: { permission: 'customers:delete' } }, async (req, reply) => {
+    await customers.eraseCustomer(adminOf(req), parse(IdParams, req.params).id);
+    return reply.code(204).send();
+  });
+
+  app.post('/customers/:id/addresses', { config: { permission: 'customers:edit' } }, async (req, reply) =>
+    reply.code(201).send(await customers.addAddress(adminOf(req), parse(IdParams, req.params).id, parse(Address, req.body))),
+  );
+
+  app.patch('/customers/:id/addresses/:addressId', { config: { permission: 'customers:edit' } }, async (req) => {
+    const { id, addressId } = parse(AddressParams, req.params);
+    return customers.updateAddress(adminOf(req), id, addressId, parse(Address.partial(), req.body));
+  });
+
+  app.delete('/customers/:id/addresses/:addressId', { config: { permission: 'customers:edit' } }, async (req) => {
+    const { id, addressId } = parse(AddressParams, req.params);
+    return customers.removeAddress(adminOf(req), id, addressId);
   });
 }
 

@@ -176,3 +176,46 @@ export interface AuditEntry {
   timestamp: string;
   actor: { id: string; name: string; email: string } | null;
 }
+
+export interface Location {
+  city: string;
+  region: string;
+  country: string;
+}
+
+export interface CustomerRow {
+  id: string;
+  name: string;
+  email: string;
+  createdAt: string;
+  updatedAt: string;
+  erasedAt: string | null;
+  /** Has a storefront login (vs. a guest/admin-created record). */
+  hasAccount: boolean;
+  location: Location | null;
+}
+
+export interface Address {
+  id: string;
+  name: string;
+  line1: string;
+  line2: string | null;
+  city: string;
+  region: string;
+  postalCode: string;
+  country: string;
+  isDefault: boolean;
+}
+
+export type AddressInput = Omit<Address, 'id' | 'isDefault'> & { isDefault?: boolean };
+
+export interface CustomerDetail extends Omit<CustomerRow, 'location'> {
+  addresses: Address[];
+}
+
+export interface CustomerOrderStats {
+  orderCount: number;
+  paidOrderCount: number;
+  totalSpentCents: number;
+  lastOrderAt: string | null;
+}

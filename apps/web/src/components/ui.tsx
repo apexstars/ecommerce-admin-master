@@ -179,12 +179,14 @@ export function Dialog({
   title,
   children,
   footer,
+  wide,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
   footer?: ReactNode;
+  wide?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -195,7 +197,7 @@ export function Dialog({
     if (!open && d.open) d.close();
   }, [open]);
   return (
-    <dialog ref={ref} className="dialog" aria-labelledby={titleId} onClose={onClose}>
+    <dialog ref={ref} className={`dialog${wide ? ' dialog-wide' : ''}`} aria-labelledby={titleId} onClose={onClose}>
       <h2 id={titleId}>{title}</h2>
       <div className="dialog-body">{children}</div>
       {footer && <div className="dialog-footer">{footer}</div>}

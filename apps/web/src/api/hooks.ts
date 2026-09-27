@@ -1,8 +1,12 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
 import type {
+  AddressInput,
   AuditEntry,
   Category,
+  CustomerDetail,
+  CustomerOrderStats,
+  CustomerRow,
   Dashboard,
   FulfillmentStatus,
   OrderDetail,
@@ -33,12 +37,13 @@ export interface OrdersParams {
   filter: OrderFilter;
   search: string;
   page: number;
+  customerId?: string;
 }
 
 export const useOrders = (p: OrdersParams) =>
   useQuery({
     queryKey: ['orders', p],
-    queryFn: () => api<OrderList>('/orders', { query: { ...p, pageSize: 20 } }),
+    queryFn: () => api<OrderList>('/orders', { query: { ...p, pageSize: p.customerId ? 10 : 20 } }),
     placeholderData: keepPreviousData,
   });
 
@@ -155,4 +160,70 @@ export function useInviteStaff() {
       api<{ user: { id: string }; inviteUrl?: string }>('/staff/invite', { method: 'POST', body: v }),
     onSuccess: () => invalidate(),
   });
+}
+
+// ── Customers ──
+export interface CustomersParams {
+  search: string;
+  sort: 'newest' | 'oldest' | 'name';
+  page: number;
+}
+
+export const useCustomers = (p: CustomersParams) =>
+  useQuery({
+    queryKey: ['customers', p],
+    queryFn: () => api<Page<CustomerRow>>('/customers', { query: { ...p, pageSize: 25 } }),
+    placeholderData: keepPreviousData,
+  });
+
+export const useCustomer = (id: string) =>
+  useQuery({ queryKey: ['customer', id], queryFn: () => api<CustomerDetail>(`/customers/${id}`) });
+
+/** Purchase history lives in the orders module and needs orders:view — callers pass `enabled`. */
+export const useCustomerStats = (ids: string[], enabled: boolean) =>
+  useQuery({
+    queryKey: ['customer-stats', ids],
+    queryFn: () => api<Record<string, CustomerOrderStats>>('/orders/customer-stats', { query: { customerIds: ids.join(',') } }),
+    enabled: enabled && ids.length > 0,
+    placeholderData: keepPreviousData,
+  });
+
+export function useCreateCustomer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { name: string; email: string; address?: AddressInput }) => api<CustomerDetail>('/customers', { method: 'POST', body: v }),
+    onSuccess: (c) => {
+      qc.setQueryData(['customer', c.id], c);
+      void qc.invalidateQueries({ queryKey: ['customers'] });
+    },
+  });
+}
+
+export function useCustomerMutations(id: string) {
+  const qc = useQueryClient();
+  const onSuccess = (c?: CustomerDetail) => {
+    if (c) qc.setQueryData(['customer', id], c);
+    else void qc.invalidateQueries({ queryKey: ['customer', id] });
+    void qc.invalidateQueries({ queryKey: ['customers'] });
+  };
+  return {
+    update: useMutation({
+      mutationFn: (v: { name?: string; email?: string }) => api<CustomerDetail>(`/customers/${id}`, { method: 'PATCH', body: v }),
+      onSuccess,
+    }),
+    erase: useMutation({ mutationFn: () => api<void>(`/customers/${id}`, { method: 'DELETE' }), onSuccess: () => onSuccess() }),
+    addAddress: useMutation({
+      mutationFn: (v: AddressInput) => api<CustomerDetail>(`/customers/${id}/addresses`, { method: 'POST', body: v }),
+      onSuccess,
+    }),
+    updateAddress: useMutation({
+      mutationFn: ({ addressId, ...v }: Partial<AddressInput> & { addressId: string }) =>
+        api<CustomerDetail>(`/customers/${id}/addresses/${addressId}`, { method: 'PATCH', body: v }),
+      onSuccess,
+    }),
+    removeAddress: useMutation({
+      mutationFn: (addressId: string) => api<CustomerDetail>(`/customers/${id}/addresses/${addressId}`, { method: 'DELETE' }),
+      onSuccess,
+    }),
+  };
 }

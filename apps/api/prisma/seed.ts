@@ -224,10 +224,13 @@ async function seedOrders(customers: Awaited<ReturnType<typeof seedCustomers>>, 
   // [days ago, how many orders]. Today and yesterday are dense so day-over-day deltas are meaningful.
   const schedule: [number, number][] = [[0, 9], [1, 11], [2, 7], [3, 8], [4, 6], [5, 9], [6, 5], [7, 7], [8, 6], [9, 8], [10, 5], [11, 6], [12, 4], [13, 6]];
 
-  for (const [daysAgo, count] of schedule) {
-    for (let i = 0; i < count; i++) {
-      const hoursIntoPast = daysAgo === 0 ? rand() * Math.max(1, new Date().getHours()) : daysAgo * 24 + rand() * 24 - 12;
-      const placedAt = new Date(now - Math.max(0.05, hoursIntoPast) * hour);
+  // Oldest first, so order numbers increase with placedAt as they would in production.
+  for (const [daysAgo, count] of [...schedule].reverse()) {
+    const hoursAgo = Array.from({ length: count }, () =>
+      Math.max(0.05, daysAgo === 0 ? rand() * Math.max(1, new Date().getHours()) : daysAgo * 24 + rand() * 24 - 12),
+    ).sort((a, b) => b - a);
+    for (const hoursIntoPast of hoursAgo) {
+      const placedAt = new Date(now - hoursIntoPast * hour);
       const customer = pick(customers);
       const lines = Array.from({ length: int(1, 3) }, () => ({ v: pick(variants), qty: rand() < 0.8 ? 1 : 2 }));
       const subtotal = lines.reduce((s, l) => s + l.v.priceCents * l.qty, 0);

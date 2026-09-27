@@ -108,6 +108,13 @@ Production runs `npm run worker -w apps/api` separately with `RUN_WORKER_IN_PROC
   yesterday up to the same time, in the viewer's time zone.
 - **The Orders screen adds a "Refunded" pill** alongside all/pending/paid/fulfilled/cancelled.
   "Paid" means awaiting fulfillment; "Fulfilled" means shipped or delivered.
+- **"Deleting" a customer erases them rather than removing the row.** Their name, email,
+  login and saved addresses are scrubbed, existing storefront tokens stop working, and the row
+  stays so orders and revenue history remain intact. Customer audit entries record *which*
+  fields changed, never the values, so the audit log isn't a second copy of personal data.
+- **Customer screens show purchase history only with `orders:view`.** Order stats come from the
+  orders module (`GET /orders/customer-stats`), so a customers-only role sees contact details
+  but not spend.
 - **Product stock is the sum across variants.** A per-variant "N variants low or out" hint
   stops a healthy total from hiding a sold-out size.
 
@@ -118,6 +125,8 @@ Production runs `npm run worker -w apps/api` separately with `RUN_WORKER_IN_PROC
 - Customer-facing storefront UI. The store API (`/api/store/*`) exists for testing the saga.
 - 3-D Secure completion on the client. The server marks `requires_action` and the Stripe
   webhook finishes the saga, but no UI drives the challenge.
+- Erasing a customer does not scrub the shipping-address snapshot on their past orders. Whether
+  that must also be anonymized depends on your legal retention requirements for order records.
 - `twoFactorSecret` is stored in plaintext; encrypt it at rest (e.g. KMS) before production.
 - Integration tests against a real database. The saga, race and RBAC paths were verified
   manually against the running stack; the automated suite is unit-level.

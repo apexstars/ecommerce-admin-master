@@ -276,6 +276,35 @@ export async function salesBetween(from: Date, to: Date) {
   return { revenueCents, orders, aovCents: orders ? Math.round(revenueCents / orders) : 0 };
 }
 
+export interface CustomerOrderStats {
+  orderCount: number;
+  paidOrderCount: number;
+  /** Paid orders only — refunded, cancelled and pending orders don't count as spend. */
+  totalSpentCents: number;
+  lastOrderAt: Date | null;
+}
+
+export async function customerOrderStats(customerIds: string[]): Promise<Record<string, CustomerOrderStats>> {
+  const ids = [...new Set(customerIds)];
+  const [all, paid] = await Promise.all([
+    prisma.order.groupBy({ by: ['customerId'], where: { customerId: { in: ids } }, _count: { _all: true }, _max: { placedAt: true } }),
+    prisma.order.groupBy({ by: ['customerId'], where: { customerId: { in: ids }, status: 'paid' }, _count: { _all: true }, _sum: { totalCents: true } }),
+  ]);
+  const allBy = new Map(all.map((r) => [r.customerId, r]));
+  const paidBy = new Map(paid.map((r) => [r.customerId, r]));
+  return Object.fromEntries(
+    ids.map((id) => [
+      id,
+      {
+        orderCount: allBy.get(id)?._count._all ?? 0,
+        paidOrderCount: paidBy.get(id)?._count._all ?? 0,
+        totalSpentCents: paidBy.get(id)?._sum.totalCents ?? 0,
+        lastOrderAt: allBy.get(id)?._max.placedAt ?? null,
+      },
+    ]),
+  );
+}
+
 export async function recentOrders(limit: number) {
   return (await listOrders({ filter: 'all', page: 1, pageSize: limit })).items;
 }

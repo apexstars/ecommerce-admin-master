@@ -94,8 +94,14 @@ model Customer {
   email        String    @unique
   passwordHash String?
   addresses    Address[]
+  // "Deleting" a customer erases their personal data but keeps the row, so
+  // historical orders and revenue stay intact.
+  erasedAt     DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
+
+  @@index([createdAt])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Customer_name_trgm")
 }
 
 model Address {
@@ -161,6 +167,7 @@ model Product {
 
   @@index([categoryId])
   @@index([status])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Product_name_trgm")
 }
 
 model ProductImage {

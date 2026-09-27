@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useOrders } from '../api/hooks';
 import type { OrderFilter } from '../api/types';
 import { ErrorState, FilterPills, FulfillmentBadge, PageHeader, Pagination, PaymentBadge, SearchInput, Spinner } from '../components/ui';
+import { useAuth } from '../lib/auth';
 import { formatDateTime, money } from '../lib/format';
 
 const FILTERS: { value: OrderFilter; label: string }[] = [
@@ -15,6 +16,7 @@ const FILTERS: { value: OrderFilter; label: string }[] = [
 ];
 
 export function OrdersPage() {
+  const { can } = useAuth();
   // Filters live in the URL so back/forward and shared links keep the view.
   const [params, setParams] = useSearchParams();
   const filter = (params.get('filter') as OrderFilter | null) ?? 'all';
@@ -95,7 +97,13 @@ export function OrdersPage() {
                       </td>
                       <td>
                         <div className="cell-stack">
-                          <span>{o.customer?.name ?? 'Unknown customer'}</span>
+                          {o.customer && can('customers:view') ? (
+                            <Link to={`/customers/${o.customer.id}`} className="link-plain">
+                              {o.customer.name}
+                            </Link>
+                          ) : (
+                            <span>{o.customer?.name ?? 'Unknown customer'}</span>
+                          )}
                           <span className="muted small">{o.customer?.email}</span>
                         </div>
                       </td>

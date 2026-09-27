@@ -42,8 +42,9 @@ export async function optionalCustomer(request: FastifyRequest): Promise<Custome
   if (!header?.startsWith('Bearer ')) return null;
   const claims = await verifyJwt(config.CUSTOMER_JWT_SECRET, CUSTOMER_AUD, header.slice(7));
   if (!claims) throw unauthorized('Invalid or expired token');
-  const customer = await prisma.customer.findUnique({ where: { id: claims.sub }, select: { id: true, email: true } });
-  if (!customer) throw unauthorized();
+  const customer = await prisma.customer.findUnique({ where: { id: claims.sub }, select: { id: true, email: true, erasedAt: true } });
+  // Erasure must cut off tokens issued before it, not just future logins.
+  if (!customer || customer.erasedAt) throw unauthorized();
   return { customerId: customer.id, email: customer.email };
 }
 
