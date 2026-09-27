@@ -1,0 +1,373 @@
+// Single database, but each model is owned by exactly one module (see the
+// "// module:" markers). Modules only touch their own tables; cross-module
+// access goes through the owning module's public API in src/modules/<m>/index.ts.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────── module: identity ───────────────────────────────
+
+enum StaffStatus {
+  active
+  invited
+}
+
+enum PermissionResource {
+  products
+  inventory
+  orders
+  discounts
+  customers
+  reports
+  settings
+}
+
+enum PermissionAction {
+  view
+  create
+  edit
+  delete
+  refund // only valid for `orders` (see PERMISSION_CATALOG)
+}
+
+model User {
+  id               String      @id @default(uuid())
+  name             String
+  email            String      @unique
+  avatarUrl        String?
+  roleId           String?
+  role             Role?       @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  status           StaffStatus @default(invited)
+  passwordHash     String?
+  // 2FA-ready: TOTP secret is set during enrollment, enforced once enabled.
+  twoFactorSecret  String?
+  twoFactorEnabled Boolean     @default(false)
+  inviteTokenHash  String?     @unique
+  inviteExpiresAt  DateTime?
+  lastActiveAt     DateTime?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  auditEntries AuditLogEntry[]
+
+  @@index([roleId])
+}
+
+model Role {
+  id          String           @id @default(uuid())
+  name        String           @unique
+  description String           @default("")
+  isSystem    Boolean          @default(false)
+  permissions RolePermission[]
+  users       User[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
+model Permission {
+  id       String             @id @default(uuid())
+  resource PermissionResource
+  action   PermissionAction
+  roles    RolePermission[]
+
+  @@unique([resource, action])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model Customer {
+  id           String    @id @default(uuid())
+  name         String
+  email        String    @unique
+  passwordHash String?
+  addresses    Address[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Address {
+  id         String   @id @default(uuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  name       String
+  line1      String
+  line2      String?
+  city       String
+  region     String
+  postalCode String
+  country    String
+  isDefault  Boolean  @default(false)
+
+  @@index([customerId])
+}
+
+// ──────────────────────────────── module: audit ─────────────────────────────────
+
+model AuditLogEntry {
+  id           String   @id @default(uuid())
+  actorUserId  String?  // null = system (e.g. the outbox worker)
+  actor        User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  action       String   // e.g. role.permissions_changed, staff.role_changed, order.refunded
+  resourceType String
+  resourceId   String
+  before       Json?
+  after        Json?
+  metadata     Json?
+  timestamp    DateTime @default(now())
+
+  @@index([resourceType, resourceId, timestamp])
+  @@index([timestamp])
+}
+
+// ─────────────────────────────── module: catalog ────────────────────────────────
+
+enum ProductStatus {
+  active
+  draft
+}
+
+model Category {
+  id       String    @id @default(uuid())
+  name     String    @unique
+  products Product[]
+}
+
+model Product {
+  id          String           @id @default(uuid())
+  name        String
+  sku         String           @unique
+  description String           @default("")
+  categoryId  String
+  category    Category         @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  priceCents  Int
+  status      ProductStatus    @default(draft)
+  variants    ProductVariant[]
+  images      ProductImage[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([categoryId])
+  @@index([status])
+}
+
+model ProductImage {
+  id         String  @id @default(uuid())
+  productId  String
+  product    Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url        String
+  storageKey String?
+  alt        String  @default("")
+  position   Int     @default(0)
+
+  @@index([productId, position])
+}
+
+model ProductVariant {
+  id         String   @id @default(uuid())
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sku        String   @unique
+  attributes Json     @default("{}") // { size?: string, color?: string }
+  priceCents Int
+  // Owned by the inventory module: only inventory code writes this column.
+  // A CHECK constraint (see migration) guarantees it never goes negative.
+  stockQty   Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([productId])
+  @@index([stockQty])
+}
+
+// ────────────────────────────── module: inventory ───────────────────────────────
+
+enum ReservationStatus {
+  active // stock decremented, order not yet paid
+  committed // order paid; stock permanently consumed
+  released // stock returned (payment failed / cancelled / refunded before shipping)
+}
+
+enum StockMovementReason {
+  adjustment
+  reservation
+  release
+}
+
+model InventoryReservation {
+  id        String            @id @default(uuid())
+  orderId   String
+  variantId String
+  qty       Int
+  status    ReservationStatus @default(active)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@unique([orderId, variantId])
+  @@index([status])
+}
+
+model StockMovement {
+  id          String              @id @default(uuid())
+  variantId   String
+  delta       Int
+  reason      StockMovementReason
+  note        String?
+  orderId     String?
+  actorUserId String?
+  createdAt   DateTime            @default(now())
+
+  @@index([variantId, createdAt])
+}
+
+// ──────────────────────────────── module: orders ────────────────────────────────
+
+enum OrderStatus {
+  pending
+  paid
+  refunded
+  cancelled
+}
+
+enum FulfillmentStatus {
+  unfulfilled
+  preparing
+  shipped
+  delivered
+}
+
+model Order {
+  id                 String            @id @default(uuid())
+  number             Int               @unique @default(autoincrement())
+  customerId         String
+  status             OrderStatus       @default(pending)
+  fulfillmentStatus  FulfillmentStatus @default(unfulfilled)
+  items              OrderItem[]
+  currency           String            @default("usd")
+  subtotalCents      Int
+  discountCents      Int               @default(0)
+  shippingCents      Int
+  taxCents           Int
+  totalCents         Int
+  discountCode       String?
+  shippingAddress    Json
+  checkoutKey        String?           @unique // client idempotency key
+  cancelReason       String?
+  placedAt           DateTime          @default(now())
+  paidAt             DateTime?
+  preparingAt        DateTime?
+  shippedAt          DateTime?
+  deliveredAt        DateTime?
+  cancelledAt        DateTime?
+  refundedAt         DateTime?
+  confirmationSentAt DateTime?
+  updatedAt          DateTime          @updatedAt
+
+  @@index([customerId])
+  @@index([status, placedAt])
+  @@index([placedAt])
+}
+
+model OrderItem {
+  id             String  @id @default(uuid())
+  orderId        String
+  order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variantId      String
+  // Snapshots so the order stays accurate if the catalog changes later.
+  productName    String
+  variantLabel   String
+  sku            String
+  imageUrl       String?
+  qty            Int
+  unitPriceCents Int
+
+  @@index([orderId])
+  @@index([variantId])
+}
+
+// ─────────────────────────────── module: payments ───────────────────────────────
+
+enum PaymentStatus {
+  pending
+  requires_action
+  succeeded
+  failed
+  refunded
+}
+
+// PCI: we only ever hold provider-issued tokens/ids and display-safe card
+// metadata (brand + last4). Raw PAN/CVC never touches this system.
+model Payment {
+  id                 String        @id @default(uuid())
+  orderId            String        @unique
+  provider           String
+  paymentMethodToken String
+  providerPaymentId  String?       @unique
+  amountCents        Int
+  refundedCents      Int           @default(0)
+  currency           String        @default("usd")
+  status             PaymentStatus @default(pending)
+  cardBrand          String?
+  cardLast4          String?
+  failureReason      String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+}
+
+// ─────────────────────────────── module: discounts ──────────────────────────────
+
+enum DiscountType {
+  percent
+  fixed
+}
+
+model Discount {
+  id         String       @id @default(uuid())
+  code       String       @unique
+  type       DiscountType
+  value      Int // percent: 1–100, fixed: cents
+  startsAt   DateTime
+  endsAt     DateTime?
+  usageLimit Int?
+  timesUsed  Int          @default(0)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+}
+
+// ─────────────────────────────── shared: outbox ─────────────────────────────────
+
+enum OutboxStatus {
+  pending
+  processing
+  done
+  dead
+}
+
+// One row per (event, subscriber) so each handler retries independently.
+model OutboxEvent {
+  id          String       @id @default(uuid())
+  topic       String
+  handler     String
+  payload     Json
+  status      OutboxStatus @default(pending)
+  attempts    Int          @default(0)
+  lastError   String?
+  availableAt DateTime     @default(now())
+  lockedUntil DateTime?
+  createdAt   DateTime     @default(now())
+  processedAt DateTime?
+
+  @@index([status, availableAt])
+}
